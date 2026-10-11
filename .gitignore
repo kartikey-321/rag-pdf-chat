@@ -1,0 +1,7 @@
+backend/myvenv/
+backend/.env
+backend/uploads/
+backend/qdrant_data/
+.vscode/settings.json
+**/__pycache__/
+.DS_Store
