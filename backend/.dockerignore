@@ -1,0 +1,15 @@
+myvenv/
+venv/
+__pycache__/
+*.pyc
+
+.env
+.env.*
+.git/
+.gitignore
+
+uploads/
+qdrant_data/
+
+.DS_Store
+.pytest_cache/

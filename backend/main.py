@@ -10,6 +10,8 @@ from test import process_doc
 from vector_store import search_chunks
 from llm_service import generate_answer
 
+from s3_service import upload_pdf_to_s3
+
 app = FastAPI()
 
 @app.get("/")
@@ -75,10 +77,14 @@ def upload_document(file: UploadFile = File(...)):
     finally:
         file.file.close()
 
+    # Upload PDF to AWS S3
+    s3_key = upload_pdf_to_s3(str(file_path), document_id)
+
     process_doc(document_id)
 
     return {
         "document_id": document_id,
         "filename": file.filename,
+        "s3_key": s3_key,
         "message": "PDF saved successfully"
     }
