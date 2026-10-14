@@ -17,7 +17,7 @@ export default function DocumentsPage() {
 
         <button
           type="button"
-          className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+          className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 cursor-pointer"
           onClick={() => setIsUploadOpen(true)}
         >
           + Upload PDF

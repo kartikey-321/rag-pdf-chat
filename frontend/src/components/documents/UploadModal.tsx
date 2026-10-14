@@ -20,7 +20,7 @@ export default function UploadModal({ onClose }: UploadModalProps) {
           <h2 id="upload-title" className="text-xl font-semibold">
             Upload PDF
           </h2>
-          <button onClick={onClose} aria-label="Close modal">
+          <button onClick={onClose} aria-label="Close modal" className="cursor-pointer">
             ✕
           </button>
         </div>
@@ -35,14 +35,14 @@ export default function UploadModal({ onClose }: UploadModalProps) {
         <div className="mt-6 flex justify-end gap-3">
           <button
             onClick={onClose}
-            className="rounded-lg border px-4 py-2"
+            className="rounded-lg border px-4 py-2 cursor-pointer"
           >
             Cancel
           </button>
 
           <button
             disabled={!file}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
           >
             Upload
           </button>
