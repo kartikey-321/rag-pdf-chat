@@ -48,6 +48,11 @@ def chat(request: ChatRequest):
             "answer": "No relevant document content found."
         }
 
+    for index, doc in enumerate(documents, start=1):
+        print(f"\n===== Retrieved Chunk {index} =====")
+        print("Metadata:", doc.metadata)
+        print("Content:", doc.page_content)
+
     answer = generate_answer(
         question=request.question,
         documents=documents
