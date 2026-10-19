@@ -1,8 +1,8 @@
 
 from qdrant_client import QdrantClient, models
-from langchain_qdrant import QdrantVectorStore
+from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langchain_huggingface import HuggingFaceEmbeddings
-from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
+from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny, PointStruct, SparseVector
 from langchain_core.documents import Document
 
 
@@ -10,7 +10,14 @@ embedding_model = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
+sparse_embedding_model = FastEmbedSparse(
+    model_name="Qdrant/bm25"
+)
+
 def store_chunks(chunks, doc_id):
+
+    create_hybrid_collection()
+
     client = QdrantClient(path="./qdrant_data")
 
     try:
@@ -29,10 +36,16 @@ def store_chunks(chunks, doc_id):
             chunk.metadata["document_id"] = doc_id
             chunk.metadata["chunk_index"] = index
 
+        # 
+        
         vector_store = QdrantVectorStore(
             client=client,
-            collection_name=collection_name,
-            embedding=embedding_model
+            collection_name="pdf_documents_hybrid",
+            embedding=embedding_model,
+            sparse_embedding=sparse_embedding_model,
+            retrieval_mode=RetrievalMode.HYBRID,
+            vector_name="dense",
+            sparse_vector_name="sparse"
         )
 
         vector_store.add_documents(chunks)
@@ -50,8 +63,12 @@ def search_chunks(question: str, doc_id: str | None = None):
     try:
         vector_store = QdrantVectorStore(
             client=client,
-            collection_name="pdf_documents",
-            embedding=embedding_model
+            collection_name="pdf_documents_hybrid",
+            embedding=embedding_model,
+            sparse_embedding=sparse_embedding_model,
+            retrieval_mode=RetrievalMode.HYBRID,
+            vector_name="dense",
+            sparse_vector_name="sparse"
         )
 
         search_filter = None
@@ -121,7 +138,7 @@ def search_chunks(question: str, doc_id: str | None = None):
 
             print(f"Batch fetching chunks: {missing_indices}")
             points, _ = client.scroll(
-                collection_name="pdf_documents",
+                collection_name="pdf_documents_hybrid",
                 scroll_filter=Filter(
                     must=[
                         FieldCondition(
@@ -174,4 +191,98 @@ def search_chunks(question: str, doc_id: str | None = None):
         client.close()
 
 
+def create_hybrid_collection():
+    client = QdrantClient(path="./qdrant_data")
 
+    try:
+        collection_name = "pdf_documents_hybrid"
+
+        if not client.collection_exists(collection_name):
+            client.create_collection(
+                collection_name=collection_name,
+                vectors_config={
+                    "dense": models.VectorParams(
+                        size=384,
+                        distance=models.Distance.COSINE
+                    )
+                },
+                sparse_vectors_config={
+                    "sparse": models.SparseVectorParams()
+                }
+            )
+
+        print("Hybrid collection ready!")
+
+    finally:
+        client.close()
+
+
+
+def migrate_to_hybrid():
+    client = QdrantClient(path="./qdrant_data")
+
+    try:
+        offset = None
+        total = 0
+
+        while True:
+            points, offset = client.scroll(
+                collection_name="pdf_documents",
+                limit=50,
+                offset=offset,
+                with_payload=True,
+                with_vectors=True
+            )
+
+            if not points:
+                break
+
+            texts = [point.payload["page_content"] for point in points]
+
+            dense_vectors = []
+
+            for point in points:
+                text = point.payload["page_content"]
+
+                if point.vector is not None:
+                    dense_vector = point.vector
+                else:
+                    dense_vector = embedding_model.embed_query(text)
+
+            dense_vectors.append(dense_vector)
+
+            # Generate BM25 sparse embeddings for the batch
+            sparse_vectors = sparse_embedding_model.embed_documents(texts)
+
+            hybrid_points = []
+
+            for point,dense, sparse in zip(points, dense_vectors, sparse_vectors):
+                hybrid_points.append(
+                    PointStruct(
+                        id=point.id,
+                        vector={
+                            "dense": dense,
+                            "sparse": SparseVector(
+                                indices=sparse.indices,
+                                values=sparse.values
+                            )
+                        },
+                        payload=point.payload
+                    )
+                )
+
+            client.upsert(
+                collection_name="pdf_documents_hybrid",
+                points=hybrid_points
+            )
+
+            total += len(hybrid_points)
+            print(f"Migrated {total} chunks")
+
+            if offset is None:
+                break
+
+        print(f"Migration complete! Total: {total} chunks")
+
+    finally:
+        client.close()
