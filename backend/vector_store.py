@@ -4,7 +4,7 @@ from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langchain_huggingface import HuggingFaceEmbeddings
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny, PointStruct, SparseVector
 from langchain_core.documents import Document
-
+from sentence_transformers import CrossEncoder
 
 embedding_model = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
@@ -12,6 +12,10 @@ embedding_model = HuggingFaceEmbeddings(
 
 sparse_embedding_model = FastEmbedSparse(
     model_name="Qdrant/bm25"
+)
+
+reranker_model = CrossEncoder(
+    "cross-encoder/ms-marco-MiniLM-L-6-v2"
 )
 
 def store_chunks(chunks, doc_id):
@@ -86,12 +90,14 @@ def search_chunks(question: str, doc_id: str | None = None):
         # Step 1: Semantic search (unchanged)
         results = vector_store.similarity_search(
             query=question,
-            k=3,
+            k=10,
             filter=search_filter
         )
 
         if not results:
             return []
+
+        results=rerank_chunks(question, results, top_k=3)
 
         # Step 2: Collect neighboring chunk indices
         neighbors_by_doc = {}
@@ -286,3 +292,66 @@ def migrate_to_hybrid():
 
     finally:
         client.close()
+
+def compare_search(question, doc_id):
+    client = QdrantClient(path="./qdrant_data")
+
+    try:
+        search_filter = Filter(
+            must=[
+                FieldCondition(
+                    key="metadata.document_id",
+                    match=MatchValue(value=doc_id)
+                )
+            ]
+        )
+
+        for mode in [RetrievalMode.DENSE, RetrievalMode.HYBRID]:
+            store = QdrantVectorStore(
+                client=client,
+                collection_name="pdf_documents_hybrid",
+                embedding=embedding_model,
+                sparse_embedding=sparse_embedding_model,
+                retrieval_mode=mode,
+                vector_name="dense",
+                sparse_vector_name="sparse"
+            )
+
+            results = store.similarity_search(
+                query=question,
+                k=3,
+                filter=search_filter
+            )
+
+            print(f"\n{mode.value} SEARCH RESULTS")
+
+            for rank, doc in enumerate(results, start=1):
+                print(
+                    f"Rank {rank} | "
+                    f"Chunk {doc.metadata.get('chunk_index')}"
+                )
+                print("Chunk length:", len(doc.page_content))
+                print(doc.page_content)
+                print("---")
+
+    finally:
+        client.close()
+
+def rerank_chunks(question, chunks, top_k=3):
+    pairs = [
+        (question, chunk.page_content)
+        for chunk in chunks
+    ]
+
+    scores = reranker_model.predict(pairs)
+
+    ranked_chunks = sorted(
+        zip(chunks, scores),
+        key=lambda item: item[1],
+        reverse=True
+    )
+
+    for chunk, score in ranked_chunks[:3]:
+        print(f"Chunk {chunk.metadata.get('chunk_index')} | Score: {score:.2f}")
+
+    return [chunk for chunk, score in ranked_chunks[:top_k]]
